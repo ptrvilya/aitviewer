@@ -46,7 +46,13 @@ class Skeletons(Node):
 
         # Nodes.
         material = Material(color=color)
-        self.spheres = Spheres(joint_positions, radius=radius, material=material, is_selectable=False)
+        self.spheres = Spheres(
+            joint_positions,
+            radius=radius,
+            material=material,
+            is_selectable=False,
+            enabled_frames=self._enabled_frames
+        )
         self.lines = Lines(
             lines=self.joint_positions[:, self.skeleton].reshape(len(self), -1, 3),
             mode="lines",
@@ -54,6 +60,7 @@ class Skeletons(Node):
             r_tip=radius / 10.0,
             material=material,
             is_selectable=False,
+            enabled_frames=self._enabled_frames
         )
         self._add_nodes(self.spheres, self.lines, show_in_hierarchy=False)
 
