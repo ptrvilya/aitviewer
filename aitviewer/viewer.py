@@ -96,6 +96,9 @@ class Viewer(moderngl_window.WindowConfig):
         :param size: Window size as (width, height) tuple, if None uses the size from the configuration file
         :param kwargs: kwargs.
         """
+        # Scaling from config for high-DPI monitors
+        self.size_mult = C.scale
+        
         # Window Setup (Following `moderngl_window.run_window_config`).
         if self.window_type is None:
             self.window_type = C.window_type
@@ -160,6 +163,8 @@ class Viewer(moderngl_window.WindowConfig):
         self.imgui_user_interacting = False
 
         # Custom UI Font
+        self.window_scale = C.scale
+        imgui.get_io().font_global_scale *= C.scale
         self.font_dir = Path(__file__).parent / "resources" / "fonts"
         self.fonts = imgui.get_io().fonts
         self.custom_font = self.fonts.add_font_from_file_ttf(os.path.join(self.font_dir, "Custom.ttf"), 15)

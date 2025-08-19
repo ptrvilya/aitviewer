@@ -21,6 +21,7 @@ camera_zoom_speed: 0.05
 # Viewer.
 window_width: 1600
 window_height: 900
+scale: 1
 fullscreen: False
 resizable: True
 vsync: True
