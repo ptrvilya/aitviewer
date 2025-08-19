@@ -152,6 +152,7 @@ class SMPLSequence(Node):
                 gui_affine=False,
                 color=(1.0, 177 / 255, 1 / 255, 1.0),
                 name="Skeleton",
+                enabled_frames=self._enabled_frames,
             )
             self._add_node(self.skeleton_seq)
 
@@ -177,7 +178,14 @@ class SMPLSequence(Node):
             self.rotation = np.matmul(np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]]), self.rotation)
 
         if self.smpl_layer.model_type != "mano":
-            self.rbs = RigidBodies(self.joints, global_oris, length=0.1, gui_affine=False, name="Joint Angles")
+            self.rbs = RigidBodies(
+                self.joints,
+                global_oris,
+                length=0.1,
+                gui_affine=False,
+                name="Joint Angles",
+                enabled_frames=self._enabled_frames
+            )
             self._add_node(self.rbs, enabled=self._show_joint_angles)
 
         self.mesh_seq = Meshes(
@@ -187,6 +195,7 @@ class SMPLSequence(Node):
             gui_affine=False,
             color=kwargs.get("color", (160 / 255, 160 / 255, 160 / 255, 1.0)),
             name="Mesh",
+            enabled_frames=self._enabled_frames
         )
         self._add_node(self.mesh_seq)
 

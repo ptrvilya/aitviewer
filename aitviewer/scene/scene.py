@@ -479,7 +479,7 @@ class Scene(Node):
                 continue
 
             # Visibility
-            curr_enabled = r.enabled
+            curr_enabled = r.enabled_gui
             if not curr_enabled:
                 imgui.push_style_color(imgui.COLOR_TEXT, 1.0, 1.0, 1.0, 0.4)
 
@@ -505,9 +505,9 @@ class Scene(Node):
                 # Aligns checkbox to the right side of the window
                 # https://github.com/ocornut/imgui/issues/196
                 imgui.same_line(position=imgui.get_window_content_region_max().x - 25)
-                eu, enabled = imgui.checkbox("##enabled_r_{}".format(r.unique_name), r.enabled)
+                eu, enabled_gui = imgui.checkbox("##enabled_r_{}".format(r.unique_name), r.enabled_gui)
                 if eu:
-                    r.enabled = enabled
+                    r.enabled_gui = enabled_gui
 
             if r.expanded:
                 # Recursively render children nodes

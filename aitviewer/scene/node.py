@@ -121,6 +121,7 @@ class Node(object):
         self.unique_name = self.name + "{}".format(self.uid)
         self.icon = icon if icon is not None else "\u0082"
         self._enabled = True
+        self._enabled_gui = True
         self._expanded = False
         self.gui_controls = {
             "affine": {
@@ -390,6 +391,7 @@ class Node(object):
         n._show_in_hierarchy = show_in_hierarchy
         n._expanded = expanded
         n._enabled = enabled if n._enabled_frames is None else n._enabled_frames[n.current_frame_id]
+        n._enabled_gui = enabled
         self.nodes.append(n)
         n.parent = self
         n.update_transform(self.model_matrix)
@@ -413,12 +415,20 @@ class Node(object):
 
     @property
     def enabled(self):
-        return self._enabled
+        return self._enabled and self.enabled_gui
 
     @enabled.setter
     def enabled(self, enabled):
         self._enabled = enabled
+    
+    @property
+    def enabled_gui(self):
+        return self._enabled_gui
 
+    @enabled_gui.setter
+    def enabled_gui(self, enabled_gui):
+        self._enabled_gui = enabled_gui    
+    
     @property
     def expanded(self):
         return self._expanded
