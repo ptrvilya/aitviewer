@@ -5,8 +5,6 @@ from typing import IO, Union
 
 import numpy as np
 import torch
-from scipy.spatial.transform import Rotation
-from smplx.joint_names import JOINT_NAMES, SMPLH_JOINT_NAMES
 
 from aitviewer.configuration import CONFIG as C
 from aitviewer.models.smpl import SMPLLayer
@@ -14,20 +12,24 @@ from aitviewer.renderables.meshes import Meshes
 from aitviewer.renderables.rigid_bodies import RigidBodies
 from aitviewer.renderables.skeletons import Skeletons
 from aitviewer.scene.node import Node
-from aitviewer.utils import interpolate_positions, local_to_global, resample_positions
-from aitviewer.utils import to_numpy as c2c
-from aitviewer.utils import to_torch
+from aitviewer.utils import (
+    interpolate_positions,
+    local_to_global,
+    resample_positions,
+    to_numpy as c2c,
+    to_torch,
+)
 from aitviewer.utils.decorators import hooked
 from aitviewer.utils.so3 import (
     aa2euler_numpy,
-)
-from aitviewer.utils.so3 import aa2rot_torch as aa2rot
-from aitviewer.utils.so3 import (
+    aa2rot_torch as aa2rot,
     euler2aa_numpy,
     interpolate_rotations,
     resample_rotations,
+    rot2aa_torch as rot2aa,
 )
-from aitviewer.utils.so3 import rot2aa_torch as rot2aa
+from scipy.spatial.transform import Rotation
+from smplx.joint_names import JOINT_NAMES, SMPLH_JOINT_NAMES
 
 
 class SMPLSequence(Node):
@@ -53,6 +55,7 @@ class SMPLSequence(Node):
         z_up=False,
         post_fk_func=None,
         icon="\u0093",
+        mesh_kwargs=None,
         **kwargs,
     ):
         """
@@ -94,7 +97,9 @@ class SMPLSequence(Node):
         if dtype is None:
             dtype = C.f_precision
 
-        super(SMPLSequence, self).__init__(n_frames=poses_body.shape[0], icon=icon, gui_material=False, **kwargs)
+        super(SMPLSequence, self).__init__(
+            n_frames=poses_body.shape[0], icon=icon, gui_material=False, **kwargs
+        )
 
         self.smpl_layer = smpl_layer
         self.post_fk_func = post_fk_func
@@ -102,11 +107,25 @@ class SMPLSequence(Node):
         self.device = device
 
         self.poses_body = to_torch(poses_body, dtype=dtype, device=device)
+        if smpl_layer.model_type in ["smplh", "smplx"]:
+            if poses_left_hand is None:
+                poses_left_hand = np.zeros(
+                    [poses_body.shape[0], 15 * 3], dtype=np.float32
+                )
+
+            if poses_right_hand is None:
+                poses_right_hand = np.zeros(
+                    [poses_body.shape[0], 15 * 3], dtype=np.float32
+                )
         self.poses_left_hand = to_torch(poses_left_hand, dtype=dtype, device=device)
         self.poses_right_hand = to_torch(poses_right_hand, dtype=dtype, device=device)
 
-        poses_root = poses_root if poses_root is not None else torch.zeros([len(poses_body), 3])
-        betas = betas if betas is not None else torch.zeros([1, self.smpl_layer.num_betas])
+        poses_root = (
+            poses_root if poses_root is not None else torch.zeros([len(poses_body), 3])
+        )
+        betas = (
+            betas if betas is not None else torch.zeros([1, self.smpl_layer.num_betas])
+        )
         trans = trans if trans is not None else torch.zeros([len(poses_body), 3])
 
         self.poses_root = to_torch(poses_root, dtype=dtype, device=device)
@@ -133,11 +152,15 @@ class SMPLSequence(Node):
             root_ori = torch.matmul(first_root_ori, root_ori)
             self.poses_root = rot2aa(root_ori)
 
-            trans = torch.matmul(first_root_ori.unsqueeze(0), self.trans.unsqueeze(-1)).squeeze()
+            trans = torch.matmul(
+                first_root_ori.unsqueeze(0), self.trans.unsqueeze(-1)
+            ).squeeze()
             self.trans = trans - trans[0:1]
 
         # Edit mode
-        self.gui_modes.update({"edit": {"title": " Edit", "fn": self.gui_mode_edit, "icon": "\u0081"}})
+        self.gui_modes.update(
+            {"edit": {"title": " Edit", "fn": self.gui_mode_edit, "icon": "\u0081"}}
+        )
 
         self._edit_joint = None
         self._edit_pose = None
@@ -162,7 +185,15 @@ class SMPLSequence(Node):
         if self.smpl_layer.model_type != "flame":
             if self.smpl_layer.model_type in ["smplh", "smplx"]:
                 global_oris = local_to_global(
-                    torch.cat([self.poses_root, self.poses_body, self.poses_left_hand, self.poses_right_hand], dim=-1),
+                    torch.cat(
+                        [
+                            self.poses_root,
+                            self.poses_body,
+                            self.poses_left_hand,
+                            self.poses_right_hand,
+                        ],
+                        dim=-1,
+                    ),
                     self.skeleton[:, 0],
                     output_format="rotmat",
                 )
@@ -177,7 +208,9 @@ class SMPLSequence(Node):
             global_oris = np.tile(np.eye(3), self.joints.shape[:-1])[np.newaxis]
 
         if self._z_up and not C.z_up:
-            self.rotation = np.matmul(np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]]), self.rotation)
+            self.rotation = np.matmul(
+                np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]]), self.rotation
+            )
 
         if self.smpl_layer.model_type != "mano":
             self.rbs = RigidBodies(
@@ -186,10 +219,11 @@ class SMPLSequence(Node):
                 length=0.1,
                 gui_affine=False,
                 name="Joint Angles",
-                enabled_frames=self._enabled_frames
+                enabled_frames=self._enabled_frames,
             )
             self._add_node(self.rbs, enabled=self._show_joint_angles)
 
+        mesh_kwargs = dict() if mesh_kwargs is None else mesh_kwargs
         self.mesh_seq = Meshes(
             self.vertices,
             self.faces,
@@ -197,7 +231,8 @@ class SMPLSequence(Node):
             gui_affine=False,
             color=kwargs.get("color", (160 / 255, 160 / 255, 160 / 255, 1.0)),
             name="Mesh",
-            enabled_frames=self._enabled_frames
+            enabled_frames=self._enabled_frames,
+            **mesh_kwargs,
         )
         self._add_node(self.mesh_seq)
 
@@ -221,12 +256,22 @@ class SMPLSequence(Node):
 
         body_data = np.load(npz_data_path)
         if smpl_layer is None:
-            smpl_layer = SMPLLayer(model_type="smplh", gender=body_data["gender"].item(), device=C.device)
+            smpl_layer = SMPLLayer(
+                model_type="smplh", gender=body_data["gender"].item(), device=C.device
+            )
 
         if log:
             print("Data keys available: {}".format(list(body_data.keys())))
-            print("{:>6d} poses of size {:>4d}.".format(body_data["poses"].shape[0], body_data["poses"].shape[1]))
-            print("{:>6d} trans of size {:>4d}.".format(body_data["trans"].shape[0], body_data["trans"].shape[1]))
+            print(
+                "{:>6d} poses of size {:>4d}.".format(
+                    body_data["poses"].shape[0], body_data["poses"].shape[1]
+                )
+            )
+            print(
+                "{:>6d} trans of size {:>4d}.".format(
+                    body_data["trans"].shape[0], body_data["trans"].shape[1]
+                )
+            )
             print("{:>6d} shape of size {:>4d}.".format(1, body_data["betas"].shape[0]))
             print("Gender {}".format(body_data["gender"]))
             print("FPS {}".format(body_data["mocap_framerate"]))
@@ -319,7 +364,9 @@ class SMPLSequence(Node):
         if smpl_layer is None:
             smpl_layer = SMPLLayer(model_type="smplh", gender="neutral")
 
-        poses = np.zeros([frames, smpl_layer.bm.NUM_BODY_JOINTS * 3])  # including hands and global root
+        poses = np.zeros(
+            [frames, smpl_layer.bm.NUM_BODY_JOINTS * 3]
+        )  # including hands and global root
         return cls(poses, smpl_layer, betas=betas, **kwargs)
 
     @classmethod
@@ -388,10 +435,14 @@ class SMPLSequence(Node):
                 poses_root = self.poses_root[self.current_frame_id][None, :]
 
             poses_left_hand = (
-                None if self.poses_left_hand is None else self.poses_left_hand[self.current_frame_id][None, :]
+                None
+                if self.poses_left_hand is None
+                else self.poses_left_hand[self.current_frame_id][None, :]
             )
             poses_right_hand = (
-                None if self.poses_right_hand is None else self.poses_right_hand[self.current_frame_id][None, :]
+                None
+                if self.poses_right_hand is None
+                else self.poses_right_hand[self.current_frame_id][None, :]
             )
             trans = self.trans[self.current_frame_id][None, :]
 
@@ -474,7 +525,9 @@ class SMPLSequence(Node):
         # Interpolate global translation.
         ts = self.trans.cpu().numpy()
         ts_interp = interpolate_positions(ts[mask_avail], all_ids[mask_avail], ids)
-        self.trans[ids] = torch.from_numpy(ts_interp).to(dtype=self.betas.dtype, device=self.betas.device)
+        self.trans[ids] = torch.from_numpy(ts_interp).to(
+            dtype=self.betas.dtype, device=self.betas.device
+        )
 
         self.redraw()
 
@@ -518,7 +571,9 @@ class SMPLSequence(Node):
 
             # Update rigid bodies.
             if self.smpl_layer.model_type != "flame":
-                global_oris = local_to_global(pose, self.skeleton[:, 0], output_format="rotmat")
+                global_oris = local_to_global(
+                    pose, self.skeleton[:, 0], output_format="rotmat"
+                )
                 global_oris = global_oris.reshape((-1, 3, 3))
                 self.rbs.current_rb_ori = c2c(global_oris)
             self.rbs.current_rb_pos = self.joints[self.current_frame_id]
@@ -617,7 +672,9 @@ class SMPLSequence(Node):
             aa = self._edit_pose[j * 3 : (j + 1) * 3].cpu().numpy()
             euler = aa2euler_numpy(aa, degrees=True)
 
-            _, self._edit_local_axes = imgui.checkbox("Local axes", self._edit_local_axes)
+            _, self._edit_local_axes = imgui.checkbox(
+                "Local axes", self._edit_local_axes
+            )
 
             # If we are editing local axes generate an empty slider on top
             # of the euler angle sliders to capture the input of the slider
@@ -656,7 +713,9 @@ class SMPLSequence(Node):
                 imgui.set_cursor_pos(pos)
 
             name = "Local XYZ" if self._edit_local_axes else "Euler XYZ"
-            u, euler = imgui.drag_float3(f"{name}##joint{j}", *euler, 0.1, format="%.3f")
+            u, euler = imgui.drag_float3(
+                f"{name}##joint{j}", *euler, 0.1, format="%.3f"
+            )
             if not self._edit_local_axes and u:
                 aa = euler2aa_numpy(np.array(euler), degrees=True)
                 self._edit_pose[j * 3 : (j + 1) * 3] = torch.from_numpy(aa)
@@ -691,15 +750,27 @@ class SMPLSequence(Node):
             self.redraw(current_frame_only=True)
         imgui.same_line()
         if imgui.button("Apply to all"):
-            edit_rots = Rotation.from_rotvec(np.reshape(self._edit_pose.cpu().numpy(), (-1, 3)))
-            base_rots = Rotation.from_rotvec(np.reshape(self.poses[self.current_frame_id].cpu().numpy(), (-1, 3)))
+            edit_rots = Rotation.from_rotvec(
+                np.reshape(self._edit_pose.cpu().numpy(), (-1, 3))
+            )
+            base_rots = Rotation.from_rotvec(
+                np.reshape(self.poses[self.current_frame_id].cpu().numpy(), (-1, 3))
+            )
             relative = edit_rots * base_rots.inv()
             for i in range(self.n_frames):
-                root = Rotation.from_rotvec(np.reshape(self.poses_root[i].cpu().numpy(), (-1, 3)))
-                self.poses_root[i] = torch.from_numpy((relative[0] * root).as_rotvec().flatten())
+                root = Rotation.from_rotvec(
+                    np.reshape(self.poses_root[i].cpu().numpy(), (-1, 3))
+                )
+                self.poses_root[i] = torch.from_numpy(
+                    (relative[0] * root).as_rotvec().flatten()
+                )
 
-                body = Rotation.from_rotvec(np.reshape(self.poses_body[i].cpu().numpy(), (-1, 3)))
-                self.poses_body[i] = torch.from_numpy((relative[1:] * body).as_rotvec().flatten())
+                body = Rotation.from_rotvec(
+                    np.reshape(self.poses_body[i].cpu().numpy(), (-1, 3))
+                )
+                self.poses_body[i] = torch.from_numpy(
+                    (relative[1:] * body).as_rotvec().flatten()
+                )
             self._edit_pose_dirty = False
             self.redraw()
         imgui.same_line()
@@ -751,14 +822,18 @@ class SMPLSequence(Node):
         # Append poses_body.
         if len(poses_body.shape) == 1:
             poses_body = poses_body[np.newaxis]
-        self.poses_body = torch.cat((self.poses_body, to_torch(poses_body, self.dtype, self.device)))
+        self.poses_body = torch.cat(
+            (self.poses_body, to_torch(poses_body, self.dtype, self.device))
+        )
 
         # Append poses_root or zeros.
         if poses_root is None:
             poses_root = torch.zeros([len(poses_body), 3])
         elif len(poses_root.shape) == 1:
             poses_root = poses_root[np.newaxis]
-        self.poses_root = torch.cat((self.poses_root, to_torch(poses_root, self.dtype, self.device)))
+        self.poses_root = torch.cat(
+            (self.poses_root, to_torch(poses_root, self.dtype, self.device))
+        )
 
         # Append trans or zeros.
         if trans is None:
@@ -785,12 +860,16 @@ class SMPLSequence(Node):
         else:
             if len(betas.shape) == 1:
                 betas = betas[np.newaxis]
-            self.betas = torch.cat((self.betas, to_torch(betas, self.dtype, self.device)))
+            self.betas = torch.cat(
+                (self.betas, to_torch(betas, self.dtype, self.device))
+            )
 
         self.n_frames = len(self.poses_body)
         self.redraw()
 
-    def update_frames(self, poses_body, frames, poses_root=None, trans=None, betas=None):
+    def update_frames(
+        self, poses_body, frames, poses_root=None, trans=None, betas=None
+    ):
         self.poses_body[frames] = to_torch(poses_body, self.dtype, self.device)
         if poses_root is not None:
             self.poses_root[frames] = to_torch(poses_root, self.dtype, self.device)
@@ -801,9 +880,9 @@ class SMPLSequence(Node):
         self.redraw()
 
     def remove_frames(self, frames):
-        frames_to_keep = torch.from_numpy(np.setdiff1d(np.arange(self.n_frames), frames)).to(
-            dtype=torch.long, device=self.device
-        )
+        frames_to_keep = torch.from_numpy(
+            np.setdiff1d(np.arange(self.n_frames), frames)
+        ).to(dtype=torch.long, device=self.device)
 
         self.poses_body = self.poses_body[frames_to_keep]
         self.poses_root = self.poses_root[frames_to_keep]
